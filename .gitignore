@@ -38,3 +38,7 @@ pnpm-lock.yaml
 yarn.lock
 package-lock.json
 bun.lockb
+
+# Credenciales de Google y Firebase
+landing-calendar-11060-firebase-adminsdk-fbsvc-b95eface7c.json
+client_secret_*.json
