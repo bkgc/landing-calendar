@@ -10,6 +10,7 @@ import {
 
 import { getFirebaseFirestore } from "@/lib/firebase/config";
 import type { Business, BusinessCategory, UserProfile } from "@/types/business";
+import { isReservedSlug } from "@/lib/utils/slugify";
 
 export interface CompleteOnboardingInput {
   businessName: string;
@@ -24,19 +25,26 @@ export class SlugUnavailableError extends Error {
   }
 }
 
-export async function getUserProfile(userId: string): Promise<UserProfile | null> {
+export async function getUserProfile(
+  userId: string,
+): Promise<UserProfile | null> {
   const snapshot = await getDoc(doc(getFirebaseFirestore(), "users", userId));
 
   return snapshot.exists() ? (snapshot.data() as UserProfile) : null;
 }
 
-export async function getBusiness(businessId: string): Promise<Business | null> {
-  const snapshot = await getDoc(doc(getFirebaseFirestore(), "businesses", businessId));
+export async function getBusiness(
+  businessId: string,
+): Promise<Business | null> {
+  const snapshot = await getDoc(
+    doc(getFirebaseFirestore(), "businesses", businessId),
+  );
 
   return snapshot.exists() ? (snapshot.data() as Business) : null;
 }
 
 export async function isSlugAvailable(slug: string): Promise<boolean> {
+  if (isReservedSlug(slug)) return false;
   const snapshot = await getDoc(doc(getFirebaseFirestore(), "slugs", slug));
 
   return !snapshot.exists();
@@ -50,7 +58,10 @@ export async function completeOnboarding(
   const businessRef = doc(collection(database, "businesses"));
   const userRef = doc(database, "users", user.uid);
   const slugRef = doc(database, "slugs", input.slug);
-  const trialEndsAt = Timestamp.fromMillis(Date.now() + 7 * 24 * 60 * 60 * 1000);
+  if (isReservedSlug(input.slug)) throw new SlugUnavailableError();
+  const trialEndsAt = Timestamp.fromMillis(
+    Date.now() + 7 * 24 * 60 * 60 * 1000,
+  );
 
   await runTransaction(database, async (transaction) => {
     const slugSnapshot = await transaction.get(slugRef);

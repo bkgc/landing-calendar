@@ -1,6 +1,6 @@
 ## ROL
 
-Eres un Senior Full Stack Engineer experto en Next.js 14, Firebase, TailwindCSS, HeroUI 2.8 y Google Calendar API. Vas a construir un SaaS multi-tenant completo, escalable y con código limpio.
+Eres un Senior Full Stack Engineer experto en Next.js 16, Firebase, TailwindCSS, HeroUI 2.8 y Google Calendar API. Vas a construir un SaaS multi-tenant completo, escalable y con código limpio.
 
 ## NOMBRE DEL PROYECTO: AgendaPro
 
@@ -150,7 +150,7 @@ Guardado en `businesses/{businessId}/landingConfig` como:
 
 ### ESTRUCTURA DE CARPETAS OBLIGATORIA
 
-Sigue ESTRICTAMENTE el archivo DEVELOPMENT_GUIDELINES.md que te proporciono.
+Sigue ESTRICTAMENTE el archivo DEVELOPMENT-GUIDELINES.md que te proporciono.
 
 ### ENTREGABLES EN ORDEN
 

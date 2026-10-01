@@ -25,9 +25,35 @@ export interface Business {
   trialEndsAt: Timestamp;
   onboardingCompleted: boolean;
   googleCalendarConnected: boolean;
+  logoUrl?: string;
+  faviconUrl?: string;
+  seoTitle?: string;
+  seoDescription?: string;
+  whatsapp?: string;
+  instagram?: string;
+  facebookPixel?: string;
+  libelulaSubscriptionId?: string;
+  currentPeriodEnd?: Timestamp;
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }
+
+export interface BusinessHoursDay {
+  open: string;
+  close: string;
+  enabled: boolean;
+}
+
+export type BusinessHours = Record<
+  | "monday"
+  | "tuesday"
+  | "wednesday"
+  | "thursday"
+  | "friday"
+  | "saturday"
+  | "sunday",
+  BusinessHoursDay
+>;
 
 export interface UserProfile {
   id: string;

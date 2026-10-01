@@ -7,7 +7,7 @@ Este archivo es OBLIGATORIO para Codex y cualquier dev. Define cómo se debe esc
 - Next.js 16.2+ con App Router
 - TypeScript Strict Mode `true`
 - HeroUI 2.8 - USAR SOLO COMPONENTES DE HEROUI. No inventar botones con divs. Importar de `@heroui/react` o `@nextui-org/react` según versión 2.8
-- TailwindCSS 3.4+ - Usar clases utilitarias, NO CSS modules, NO styled-components
+- TailwindCSS 4.3+ - Usar clases utilitarias, NO CSS modules, NO styled-components
 - Firebase JS SDK 10+ (modular)
 
 ## 2. ESTRUCTURA DE PROYECTO - ESTRICTA
@@ -93,7 +93,7 @@ Este archivo es OBLIGATORIO para Codex y cualquier dev. Define cómo se debe esc
 ### A) Componentes
 
 - **Un componente = Un archivo.** No metas 3 componentes en un mismo archivo.
-- **Máximo 150 líneas por componente.** Si crece, sepáralo en subcomponentes en `/components/nombre/`.
+- **Máximo 700 líneas por componente.** Si crece, sepáralo en subcomponentes en `/components/nombre/`.
 - Props tipadas con `interface Props` y `zod` para validación.
 - Componentes de UI puros (presentacionales) NO hacen fetch. Reciben datos por props.
 - Lógica de fetch en Server Components o en hooks custom `/lib/hooks`.

@@ -1,7 +1,11 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { GoogleAuthProvider, signInWithEmailAndPassword, signInWithPopup } from "firebase/auth";
+import {
+  GoogleAuthProvider,
+  signInWithEmailAndPassword,
+  signInWithPopup,
+} from "firebase/auth";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
@@ -15,7 +19,9 @@ import { getUserProfile } from "@/lib/firebase/firestore";
 
 const loginSchema = z.object({
   email: z.string().email("Ingresa un correo válido."),
-  password: z.string().min(8, "La contraseña debe tener al menos 8 caracteres."),
+  password: z
+    .string()
+    .min(8, "La contraseña debe tener al menos 8 caracteres."),
 });
 
 type LoginValues = z.infer<typeof loginSchema>;
@@ -25,7 +31,11 @@ export function LoginForm() {
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const router = useRouter();
   const searchParams = useSearchParams();
-  const nextPath = searchParams.get("next") ?? "/dashboard";
+  const requestedNextPath = searchParams.get("next") ?? "/dashboard";
+  const nextPath =
+    requestedNextPath.startsWith("/") && !requestedNextPath.startsWith("//")
+      ? requestedNextPath
+      : "/dashboard";
   const form = useForm<LoginValues>({ resolver: zodResolver(loginSchema) });
 
   const redirectAfterAuthentication = async (userId: string) => {
@@ -33,11 +43,25 @@ export function LoginForm() {
     router.replace(profile?.onboardingCompleted ? nextPath : "/onboarding");
   };
 
+  const persistSession = async (userId: string) => {
+    const user = getFirebaseAuth().currentUser;
+    if (!user || user.uid !== userId) return;
+    await fetch("/api/auth/session", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${await user.getIdToken()}` },
+    });
+  };
+
   const onSubmit = async (values: LoginValues) => {
     setError(null);
 
     try {
-      const credential = await signInWithEmailAndPassword(getFirebaseAuth(), values.email, values.password);
+      const credential = await signInWithEmailAndPassword(
+        getFirebaseAuth(),
+        values.email,
+        values.password,
+      );
+      await persistSession(credential.user.uid);
       await redirectAfterAuthentication(credential.user.uid);
     } catch (caughtError) {
       setError(getAuthErrorMessage(caughtError));
@@ -49,7 +73,11 @@ export function LoginForm() {
     setIsGoogleLoading(true);
 
     try {
-      const credential = await signInWithPopup(getFirebaseAuth(), new GoogleAuthProvider());
+      const credential = await signInWithPopup(
+        getFirebaseAuth(),
+        new GoogleAuthProvider(),
+      );
+      await persistSession(credential.user.uid);
       await redirectAfterAuthentication(credential.user.uid);
     } catch (caughtError) {
       setError(getAuthErrorMessage(caughtError));
@@ -59,8 +87,16 @@ export function LoginForm() {
   };
 
   return (
-    <form className="flex flex-col gap-5" onSubmit={form.handleSubmit(onSubmit)}>
-      <Button isLoading={isGoogleLoading} type="button" variant="bordered" onPress={signInWithGoogle}>
+    <form
+      className="flex flex-col gap-5"
+      onSubmit={form.handleSubmit(onSubmit)}
+    >
+      <Button
+        isLoading={isGoogleLoading}
+        type="button"
+        variant="bordered"
+        onPress={signInWithGoogle}
+      >
         Continuar con Google
       </Button>
       <Divider />
@@ -79,7 +115,11 @@ export function LoginForm() {
         errorMessage={form.formState.errors.password?.message}
       />
       {error ? <p className="text-sm text-danger">{error}</p> : null}
-      <Button color="primary" isLoading={form.formState.isSubmitting} type="submit">
+      <Button
+        color="primary"
+        isLoading={form.formState.isSubmitting}
+        type="submit"
+      >
         Ingresar a AgendaPro
       </Button>
       <p className="text-center text-sm text-default-500">

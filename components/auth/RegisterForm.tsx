@@ -21,7 +21,9 @@ const registerSchema = z
   .object({
     email: z.string().email("Ingresa un correo válido."),
     name: z.string().trim().min(2, "Ingresa tu nombre."),
-    password: z.string().min(8, "La contraseña debe tener al menos 8 caracteres."),
+    password: z
+      .string()
+      .min(8, "La contraseña debe tener al menos 8 caracteres."),
     passwordConfirmation: z.string(),
   })
   .refine((values) => values.password === values.passwordConfirmation, {
@@ -35,7 +37,9 @@ export function RegisterForm() {
   const [error, setError] = useState<string | null>(null);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const router = useRouter();
-  const form = useForm<RegisterValues>({ resolver: zodResolver(registerSchema) });
+  const form = useForm<RegisterValues>({
+    resolver: zodResolver(registerSchema),
+  });
 
   const onSubmit = async (values: RegisterValues) => {
     setError(null);
@@ -47,6 +51,12 @@ export function RegisterForm() {
         values.password,
       );
       await updateProfile(credential.user, { displayName: values.name });
+      await fetch("/api/auth/session", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${await credential.user.getIdToken()}`,
+        },
+      });
       router.replace("/onboarding");
     } catch (caughtError) {
       setError(getAuthErrorMessage(caughtError));
@@ -58,7 +68,16 @@ export function RegisterForm() {
     setIsGoogleLoading(true);
 
     try {
-      await signInWithPopup(getFirebaseAuth(), new GoogleAuthProvider());
+      const credential = await signInWithPopup(
+        getFirebaseAuth(),
+        new GoogleAuthProvider(),
+      );
+      await fetch("/api/auth/session", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${await credential.user.getIdToken()}`,
+        },
+      });
       router.replace("/onboarding");
     } catch (caughtError) {
       setError(getAuthErrorMessage(caughtError));
@@ -68,8 +87,16 @@ export function RegisterForm() {
   };
 
   return (
-    <form className="flex flex-col gap-5" onSubmit={form.handleSubmit(onSubmit)}>
-      <Button isLoading={isGoogleLoading} type="button" variant="bordered" onPress={signUpWithGoogle}>
+    <form
+      className="flex flex-col gap-5"
+      onSubmit={form.handleSubmit(onSubmit)}
+    >
+      <Button
+        isLoading={isGoogleLoading}
+        type="button"
+        variant="bordered"
+        onPress={signUpWithGoogle}
+      >
         Registrarme con Google
       </Button>
       <Divider />
@@ -101,7 +128,11 @@ export function RegisterForm() {
         errorMessage={form.formState.errors.passwordConfirmation?.message}
       />
       {error ? <p className="text-sm text-danger">{error}</p> : null}
-      <Button color="primary" isLoading={form.formState.isSubmitting} type="submit">
+      <Button
+        color="primary"
+        isLoading={form.formState.isSubmitting}
+        type="submit"
+      >
         Crear mi cuenta
       </Button>
       <p className="text-center text-sm text-default-500">

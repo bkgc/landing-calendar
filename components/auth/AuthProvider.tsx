@@ -2,7 +2,13 @@
 
 import type { User } from "firebase/auth";
 import { onAuthStateChanged } from "firebase/auth";
-import { createContext, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 
 import { getFirebaseAuth, isFirebaseConfigured } from "@/lib/firebase/config";
 import { getBusiness, getUserProfile } from "@/lib/firebase/firestore";
@@ -39,9 +45,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const loadUserData = useCallback(async (user: User | null) => {
     if (!user) {
+      await fetch("/api/auth/session", { method: "DELETE" }).catch(
+        () => undefined,
+      );
       setState({ ...initialState, loading: false });
       return;
     }
+
+    const token = await user.getIdToken();
+    await fetch("/api/auth/session", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    });
 
     const profile = await getUserProfile(user.uid);
     const business = profile ? await getBusiness(profile.businessId) : null;
@@ -51,7 +66,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!isFirebaseConfigured()) {
-      setConfigError("Faltan las variables de Firebase. Revisa .env.local antes de continuar.");
+      setConfigError(
+        "Faltan las variables de Firebase. Revisa .env.local antes de continuar.",
+      );
       setState({ ...initialState, loading: false });
       return;
     }
