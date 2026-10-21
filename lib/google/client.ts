@@ -36,21 +36,40 @@ export async function getGoogleClient(businessId: string) {
     expiryDate: number;
   };
   const oauth = getGoogleOAuthClient();
+  const refreshToken = decrypt(data.refreshToken);
   oauth.setCredentials({
     access_token: decrypt(data.accessToken),
-    refresh_token: decrypt(data.refreshToken),
+    refresh_token: refreshToken,
     expiry_date: data.expiryDate,
   });
 
   if (!data.expiryDate || data.expiryDate <= Date.now() + 60_000) {
-    const refreshed = await oauth.refreshAccessToken();
-    const credentials = refreshed.credentials;
-    if (credentials.access_token) {
-      await reference.update({
-        accessToken: encrypt(credentials.access_token),
-        expiryDate: credentials.expiry_date || Date.now() + 3_600_000,
-        updatedAt: new Date(),
-      });
+    try {
+      const refreshed = await oauth.refreshAccessToken();
+      const credentials = refreshed.credentials;
+      if (credentials.access_token) {
+        await reference.update({
+          accessToken: encrypt(credentials.access_token),
+          refreshToken: encrypt(refreshToken),
+          expiryDate: credentials.expiry_date || Date.now() + 3_600_000,
+          updatedAt: new Date(),
+        });
+      }
+    } catch (refreshErr) {
+      const errStr = String(refreshErr);
+      if (errStr.includes("invalid_grant") || errStr.includes("Token has been expired or revoked")) {
+        try {
+          await getAdminFirestore()
+            .doc(`businesses/${businessId}`)
+            .update({ googleCalendarConnected: false, updatedAt: new Date() });
+        } catch (disconnectError) {
+          console.error(
+            "No se pudo actualizar el estado de conexión de Google Calendar.",
+            disconnectError,
+          );
+        }
+      }
+      throw refreshErr;
     }
   }
   return google.calendar({ version: "v3", auth: oauth });

@@ -89,6 +89,7 @@ export default async function PublicBusinessPage({
 
       <BlockRenderer
         business={result.business}
+        businessHours={result.businessHours}
         config={result.config}
         services={result.services}
         staff={result.staff}

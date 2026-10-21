@@ -1,13 +1,27 @@
-const buckets = new Map<string, { count: number; resetAt: number }>();
+import { createHash } from "node:crypto";
 
-export function rateLimit(key: string, limit = 60, windowMs = 60_000) {
+import { getAdminFirestore } from "@/lib/firebase/admin";
+
+export async function rateLimit(
+  key: string,
+  limit = 60,
+  windowMs = 60_000,
+) {
   const now = Date.now();
-  const current = buckets.get(key);
-  if (!current || current.resetAt <= now) {
-    buckets.set(key, { count: 1, resetAt: now + windowMs });
+  const windowStart = Math.floor(now / windowMs) * windowMs;
+  const id = createHash("sha256")
+    .update(`${key}:${windowStart}`)
+    .digest("hex");
+  const reference = getAdminFirestore().doc(`rateLimits/${id}`);
+
+  return getAdminFirestore().runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(reference);
+    const count = (snapshot.data()?.count as number | undefined) || 0;
+    if (count >= limit) return false;
+    transaction.set(reference, {
+      count: count + 1,
+      expiresAt: new Date(windowStart + windowMs * 2),
+    });
     return true;
-  }
-  if (current.count >= limit) return false;
-  current.count += 1;
-  return true;
+  });
 }

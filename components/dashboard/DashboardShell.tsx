@@ -153,7 +153,10 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
               </Button>
             </div>
           </div>
-          <div className="flex gap-1 overflow-x-auto border-t border-[var(--app-line)] px-4 py-2 lg:hidden">
+          <nav
+            aria-label="Navegación móvil"
+            className="grid grid-cols-4 gap-1 border-t border-[var(--app-line)] px-2 py-2 lg:hidden"
+          >
             {navItems.map((item) => {
               const Icon = item.icon;
               const active = isActive(pathname, item.href);
@@ -161,18 +164,18 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
                 <Button
                   key={item.href}
                   as={Link}
-                  className="shrink-0"
+                  className="h-auto min-w-0 flex-col gap-1 px-1 py-2 text-[10px]"
                   color={active ? "primary" : "default"}
                   href={item.href}
                   size="sm"
-                  startContent={<Icon size={15} />}
+                  startContent={<Icon size={16} />}
                   variant={active ? "flat" : "light"}
                 >
                   {item.label}
                 </Button>
               );
             })}
-          </div>
+          </nav>
         </header>
         <main className="mx-auto min-h-[calc(100vh-4rem)] max-w-[1440px] px-5 py-7 lg:px-8 lg:py-9">
           {children}

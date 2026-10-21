@@ -10,6 +10,7 @@ import {
   requireServerSession,
 } from "@/lib/server/session";
 import { rateLimit } from "@/lib/server/rate-limit";
+import { getAppointmentLockReferences } from "@/lib/server/appointment-locks";
 import { dateWithBusinessTime } from "@/lib/utils/date";
 
 const bookingSchema = z.object({
@@ -23,19 +24,50 @@ const bookingSchema = z.object({
   clientEmail: z.string().email().or(z.literal("")),
 });
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const session = await requireServerSession();
-    const snapshot = await getAdminFirestore()
-      .collection(`businesses/${session.business.id}/appointments`)
-      .orderBy("start", "desc")
-      .limit(100)
-      .get();
+    const url = new URL(request.url);
+    const startDate = url.searchParams.get("startDate");
+    const endDate = url.searchParams.get("endDate");
+    const limitParam = parseInt(url.searchParams.get("limit") || "150", 10);
+    const queryLimit = Number.isFinite(limitParam)
+      ? Math.min(Math.max(limitParam, 1), 300)
+      : 150;
+    const cursor = url.searchParams.get("cursor");
+
+    let query: FirebaseFirestore.Query = getAdminFirestore()
+      .collection(`businesses/${session.business.id}/appointments`);
+
+    if (startDate) {
+      query = query.where("start", ">=", startDate);
+    }
+    if (endDate) {
+      query = query.where("start", "<=", endDate);
+    }
+
+    query = query.orderBy("start", "desc");
+    if (cursor) {
+      const cursorSnapshot = await getAdminFirestore()
+        .collection(`businesses/${session.business.id}/appointments`)
+        .doc(cursor)
+        .get();
+      if (!cursorSnapshot.exists) return fail("Cursor de citas inválido.", 400);
+      query = query.startAfter(cursorSnapshot);
+    }
+    const snapshot = await query.limit(queryLimit + 1).get();
+    const hasMore = snapshot.docs.length > queryLimit;
+    const page = hasMore ? snapshot.docs.slice(0, queryLimit) : snapshot.docs;
+
     return ok(
-      snapshot.docs.map((document) => ({
-        id: document.id,
-        ...document.data(),
-      })),
+      {
+        items: page.map((document) => ({
+          id: document.id,
+          ...document.data(),
+        })),
+        nextCursor: hasMore ? page[page.length - 1]?.id || null : null,
+        hasMore,
+      },
     );
   } catch (error) {
     return unknownError(error);
@@ -44,8 +76,11 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const source = request.headers.get("x-forwarded-for") || "public";
-    if (!rateLimit(`appointment:${source}`, 20, 60_000))
+    const source =
+      request.headers.get("x-real-ip")?.trim() ||
+      request.headers.get("x-forwarded-for")?.split(",").at(-1)?.trim() ||
+      "unknown";
+    if (!(await rateLimit(`appointment:${source}`, 20, 60_000)))
       return fail(
         "Demasiadas solicitudes. Intenta nuevamente en un minuto.",
         429,
@@ -92,30 +127,57 @@ export async function POST(request: Request) {
       duration: number;
       bufferTime?: number;
       staffIds?: string[];
+      active?: boolean;
     };
-    let staffId = input.data.staffId || service.staffIds?.[0];
+    if (service.active !== true)
+      return fail("Este servicio no está disponible.", 404);
+    let staffId = input.data.staffId;
     if (!staffId) {
       const staffSnapshot = await database
         .collection(`businesses/${input.data.businessId}/staff`)
         .where("active", "==", true)
-        .limit(1)
         .get();
-      if (!staffSnapshot.empty) {
-        staffId = staffSnapshot.docs[0].id;
+      const eligibleStaff = staffSnapshot.docs.filter(
+        (document) =>
+          !service.staffIds?.length || service.staffIds.includes(document.id),
+      );
+      if (eligibleStaff.length) {
+        staffId = eligibleStaff[0].id;
+      } else if (service.staffIds?.length) {
+        return fail("Este servicio no tiene profesionales activos asignados.", 409);
       } else {
         const defaultStaffRef = database
           .collection(`businesses/${input.data.businessId}/staff`)
-          .doc();
-        await defaultStaffRef.set({
-          name: (businessSnapshot.data()?.name as string) || "Equipo de Atención",
-          role: "Especialista",
-          googleCalendarId: "primary",
-          active: true,
-          createdAt: new Date(),
-          updatedAt: new Date(),
+          .doc("default");
+        await database.runTransaction(async (transaction) => {
+          const defaultStaff = await transaction.get(defaultStaffRef);
+          if (!defaultStaff.exists) {
+            transaction.create(defaultStaffRef, {
+              businessId: input.data.businessId,
+              name:
+                (businessSnapshot.data()?.name as string) ||
+                "Equipo de Atención",
+              role: "Especialista",
+              googleCalendarId: "primary",
+              active: true,
+              createdAt: new Date(),
+              updatedAt: new Date(),
+            });
+          }
         });
         staffId = defaultStaffRef.id;
       }
+    }
+    const selectedStaffSnapshot = await database
+      .doc(`businesses/${input.data.businessId}/staff/${staffId}`)
+      .get();
+    if (
+      !selectedStaffSnapshot.exists ||
+      selectedStaffSnapshot.data()?.active !== true ||
+      (service.staffIds?.length &&
+        !service.staffIds.includes(staffId))
+    ) {
+      return fail("El profesional seleccionado no puede atender este servicio.", 400);
     }
 
     const slots = await getAvailableSlots({
@@ -133,16 +195,26 @@ export async function POST(request: Request) {
     const appointmentReference = database
       .collection(`businesses/${input.data.businessId}/appointments`)
       .doc();
-    const lockReference = database.doc(
-      `businesses/${input.data.businessId}/appointmentLocks/${staffId}_${input.data.date}_${input.data.time.replace(":", "-")}`,
+    const lockReferences = getAppointmentLockReferences(
+      database,
+      input.data.businessId,
+      staffId,
+      input.data.date,
+      input.data.time,
+      service.duration + (service.bufferTime || 0),
     );
     await database.runTransaction(async (transaction) => {
-      const lock = await transaction.get(lockReference);
-      if (lock.exists) throw new Error("Ese horario ya fue reservado.");
-      transaction.create(lockReference, {
-        appointmentId: appointmentReference.id,
-        createdAt: new Date(),
-      });
+      const locks = await Promise.all(
+        lockReferences.map((reference) => transaction.get(reference)),
+      );
+      if (locks.some((lock) => lock.exists))
+        throw new Error("Ese horario ya fue reservado.");
+      lockReferences.forEach((reference) =>
+        transaction.create(reference, {
+          appointmentId: appointmentReference.id,
+          createdAt: new Date(),
+        }),
+      );
       transaction.create(appointmentReference, {
         businessId: input.data.businessId,
         serviceId: input.data.serviceId,

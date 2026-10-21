@@ -7,6 +7,7 @@ import {
   CalendarDays,
   CheckCircle2,
   Clock3,
+  MessageCircle,
   UserRound,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -26,6 +27,7 @@ import {
   Spinner,
 } from "@/components/ui";
 import { BUSINESS_TIME_ZONE } from "@/lib/utils/date";
+import type { BusinessHours } from "@/types/business";
 import type { BookingCalendarBlockProps } from "@/types/blocks";
 import type { Service } from "@/types/service";
 import type { StaffMember } from "@/types/staff";
@@ -43,6 +45,8 @@ type MessageTone = "success" | "danger" | null;
 
 interface BookingCalendarComponentProps extends BookingCalendarBlockProps {
   businessId: string;
+  businessWhatsapp?: string;
+  businessHours?: BusinessHours;
   services: Service[];
   staff: StaffMember[];
   preview?: boolean;
@@ -66,6 +70,8 @@ function formatPrice(price: number) {
 
 export function BookingCalendarBlock({
   businessId,
+  businessWhatsapp,
+  businessHours,
   services,
   staff,
   title = "Encuentra tu horario",
@@ -85,6 +91,7 @@ export function BookingCalendarBlock({
   const [availabilityError, setAvailabilityError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [messageTone, setMessageTone] = useState<MessageTone>(null);
+  const [confirmationUrl, setConfirmationUrl] = useState<string | null>(null);
   const service = activeServices.find((item) => item.id === serviceId);
   const availableStaff = useMemo(() => {
     if (!service) return [];
@@ -186,6 +193,7 @@ export function BookingCalendarBlock({
     setSelectedSlot("");
     setMessage(null);
     setMessageTone(null);
+    setConfirmationUrl(null);
   };
 
   const bookAppointment = async (values: BookingForm) => {
@@ -215,6 +223,14 @@ export function BookingCalendarBlock({
       setSlots((current) => current.filter((slot) => slot !== selectedSlot));
       setMessage("Tu cita quedó confirmada. Te esperamos.");
       setMessageTone("success");
+      const whatsappNumber = businessWhatsapp?.replace(/\D/g, "");
+      setConfirmationUrl(
+        whatsappNumber
+          ? `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(
+              `Hola, acabo de reservar ${service.name} para el ${formatDate(date)} a las ${selectedSlot}. Soy ${values.clientName}.`,
+            )}`
+          : null,
+      );
       setSelectedSlot("");
       reset();
     } catch {
@@ -261,46 +277,67 @@ export function BookingCalendarBlock({
                       Verás horarios que respetan la duración de tu reserva.
                     </p>
                   </div>
-                  <Select
-                    label="Servicio"
-                    selectedKeys={serviceId ? [serviceId] : []}
-                    onSelectionChange={(keys) => {
-                      setServiceId(String(Array.from(keys)[0] || ""));
-                      resetSelection();
-                    }}
-                  >
-                    {activeServices.map((item) => (
-                      <SelectItem key={item.id}>{item.name}</SelectItem>
-                    ))}
-                  </Select>
+                  <div className="space-y-2">
+                    <Select
+                      label="Servicio"
+                      placeholder="Selecciona un servicio"
+                      disallowEmptySelection
+                      selectedKeys={serviceId ? new Set([serviceId]) : new Set([])}
+                      onSelectionChange={(keys) => {
+                        const selected = Array.from(keys)[0];
+                        if (selected) {
+                          setServiceId(String(selected));
+                          resetSelection();
+                        }
+                      }}
+                    >
+                      {activeServices.map((item) => (
+                        <SelectItem key={item.id} textValue={item.name}>
+                          <div className="flex items-center justify-between gap-2">
+                            <span>{item.name}</span>
+                            <span className="text-xs opacity-60">
+                              {item.duration}m · {formatPrice(item.price)}
+                            </span>
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </Select>
+                  </div>
                   {service ? (
-                    <div className="flex flex-wrap gap-2">
-                      <Chip size="sm" variant="flat">
-                        {service.duration} min
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Chip size="sm" variant="flat" color="primary">
+                        ⏱️ {service.duration} min
                       </Chip>
-                      <Chip size="sm" variant="flat">
-                        {formatPrice(service.price)}
+                      <Chip size="sm" variant="flat" color="success">
+                        💰 {formatPrice(service.price)}
                       </Chip>
                     </div>
                   ) : null}
                   {availableStaff.length > 1 ? (
                     <Select
                       label="Profesional"
-                      selectedKeys={staffId ? [staffId] : []}
+                      placeholder="Selecciona el profesional"
+                      disallowEmptySelection
+                      selectedKeys={staffId ? new Set([staffId]) : new Set([])}
                       startContent={<UserRound size={16} />}
                       onSelectionChange={(keys) => {
-                        setStaffId(String(Array.from(keys)[0] || ""));
-                        resetSelection();
+                        const selected = Array.from(keys)[0];
+                        if (selected) {
+                          setStaffId(String(selected));
+                          resetSelection();
+                        }
                       }}
                     >
                       {availableStaff.map((member) => (
-                        <SelectItem key={member.id}>{member.name}</SelectItem>
+                        <SelectItem key={member.id} textValue={member.name}>
+                          {member.name} {member.role ? `(${member.role})` : ""}
+                        </SelectItem>
                       ))}
                     </Select>
                   ) : selectedStaff ? (
-                    <div className="flex items-center gap-2 text-sm text-[var(--landing-primary)]">
+                    <div className="flex items-center gap-2 text-sm text-[var(--landing-primary)] font-medium">
                       <UserRound size={16} />
-                      Atiende: {selectedStaff.name}
+                      Atiende: {selectedStaff.name} {selectedStaff.role ? `· ${selectedStaff.role}` : ""}
                     </div>
                   ) : (
                     <div className="flex items-center gap-2 text-xs opacity-65">
@@ -309,19 +346,60 @@ export function BookingCalendarBlock({
                     </div>
                   )}
                   <div className="space-y-3 border-t border-black/10 pt-5">
-                    <div>
-                      <p className="text-sm font-semibold">2. Escoge una fecha</p>
-                      <p className="mt-1 text-sm capitalize opacity-65">{formatDate(date)}</p>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <p className="text-sm font-semibold">2. Escoge una fecha</p>
+                        <p className="mt-1 text-sm capitalize opacity-75 font-medium">{formatDate(date)}</p>
+                      </div>
+                      <div className="flex gap-1.5">
+                        <Button
+                          size="sm"
+                          variant={isSelectedToday ? "solid" : "flat"}
+                          color={isSelectedToday ? "primary" : "default"}
+                          onPress={() => {
+                            setDate(today(BUSINESS_TIME_ZONE).toString());
+                            resetSelection();
+                          }}
+                        >
+                          Hoy
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="flat"
+                          onPress={() => {
+                            const tmrw = today(BUSINESS_TIME_ZONE).add({ days: 1 }).toString();
+                            setDate(tmrw);
+                            resetSelection();
+                          }}
+                        >
+                          Mañana
+                        </Button>
+                      </div>
                     </div>
                     <Calendar
                       aria-label="Selecciona una fecha"
                       className="w-full"
                       isDisabled={!canBook}
+                      isDateUnavailable={(value) => {
+                        const weekdayKeys = [
+                          "sunday",
+                          "monday",
+                          "tuesday",
+                          "wednesday",
+                          "thursday",
+                          "friday",
+                          "saturday",
+                        ] as const;
+                        const weekday = value.toDate(BUSINESS_TIME_ZONE).getDay();
+                        return businessHours?.[weekdayKeys[weekday]]?.enabled === false;
+                      }}
                       minValue={today(BUSINESS_TIME_ZONE)}
                       value={parseDate(date)}
                       onChange={(value) => {
-                        setDate(value.toString());
-                        resetSelection();
+                        if (value) {
+                          setDate(value.toString());
+                          resetSelection();
+                        }
                       }}
                     />
                   </div>
@@ -377,18 +455,29 @@ export function BookingCalendarBlock({
                               ? "Los horarios para el día de hoy ya no están disponibles o la jornada ha concluido."
                               : "No hay horarios disponibles para esta fecha. Prueba con otro día."}
                           </p>
-                          <Button
-                            size="sm"
-                            color="primary"
-                            variant="flat"
-                            onPress={() => {
-                              const nextDay = parseDate(date).add({ days: 1 }).toString();
-                              setDate(nextDay);
-                              resetSelection();
-                            }}
-                          >
-                            Ver horarios del día siguiente
-                          </Button>
+                          <div className="flex flex-wrap gap-2">
+                            {[1, 2, 3].map((offset) => {
+                              const nextDate = parseDate(date)
+                                .add({ days: offset })
+                                .toString();
+                              return (
+                                <Button
+                                  key={nextDate}
+                                  size="sm"
+                                  color={offset === 1 ? "primary" : "default"}
+                                  variant={offset === 1 ? "flat" : "bordered"}
+                                  onPress={() => {
+                                    setDate(nextDate);
+                                    resetSelection();
+                                  }}
+                                >
+                                  {offset === 1
+                                    ? "Mañana"
+                                    : `En ${offset} días`}
+                                </Button>
+                              );
+                            })}
+                          </div>
                         </div>
                       )}
                     </div>
@@ -449,13 +538,26 @@ export function BookingCalendarBlock({
               </div>
             )}
             {message ? (
-              <p
-                aria-live="polite"
-                className={`flex items-center gap-2 text-sm font-medium ${messageTone === "danger" ? "text-danger" : "text-[var(--landing-primary)]"}`}
-              >
-                <CheckCircle2 size={17} />
-                {message}
-              </p>
+              <div className="flex flex-wrap items-center gap-3">
+                <p
+                  aria-live="polite"
+                  className={`flex items-center gap-2 text-sm font-medium ${messageTone === "danger" ? "text-danger" : "text-[var(--landing-primary)]"}`}
+                >
+                  <CheckCircle2 size={17} />
+                  {message}
+                </p>
+                {confirmationUrl ? (
+                  <a
+                    className="inline-flex min-h-10 items-center gap-2 rounded-xl bg-[#25D366] px-4 py-2 text-sm font-semibold text-white transition hover:bg-[#1fbd5b] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#128C7E]"
+                    href={confirmationUrl}
+                    rel="noreferrer"
+                    target="_blank"
+                  >
+                    <MessageCircle size={16} />
+                    Abrir WhatsApp con confirmación
+                  </a>
+                ) : null}
+              </div>
             ) : null}
           </CardBody>
         </Card>

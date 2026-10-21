@@ -188,7 +188,7 @@ export default function EditorPage() {
             startContent={<Save size={16} />}
             onPress={() => void save()}
           >
-            Guardar cambios
+            Guardar ahora
           </Button>
         </div>
       </div>
@@ -306,14 +306,14 @@ export default function EditorPage() {
               <span>
                 {lastSavedAt
                   ? `Último guardado: ${lastSavedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
-                  : "Los cambios se guardan automáticamente"}
+                  : "Los cambios se guardan automáticamente; puedes guardar ahora en cualquier momento."}
               </span>
             </div>
           </CardBody>
         </Card>
 
         <Card className="border border-[var(--app-line)] shadow-none xl:sticky xl:top-24">
-          <CardBody className="max-h-[calc(100vh-7rem)] overflow-y-auto p-5">
+          <CardBody className="p-5 xl:max-h-[calc(100vh-7rem)] xl:overflow-y-auto">
             {selectedBlockId ? <PropertiesPanel /> : <ThemePanel />}
           </CardBody>
         </Card>

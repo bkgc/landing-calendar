@@ -4,9 +4,12 @@ import {
   AlignCenter,
   AlignLeft,
   AlignRight,
+  ChevronDown,
+  ChevronUp,
   Film,
   Image as ImageIcon,
   Layout,
+  Palette,
   Sparkles,
   Upload,
 } from "lucide-react";
@@ -69,6 +72,10 @@ export function BlockStyleProperties({ props, set }: BlockStylePropertiesProps) 
   const padding = (props.padding as string) || "md";
 
   const [uploading, setUploading] = useState(false);
+  const [colorA, setColorA] = useState("#064e3b");
+  const [colorB, setColorB] = useState("#0f766e");
+  const [direction, setDirection] = useState("135deg");
+  const [showAdvancedCss, setShowAdvancedCss] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleUpload = async (file: File) => {
@@ -157,38 +164,154 @@ export function BlockStyleProperties({ props, set }: BlockStylePropertiesProps) 
         ) : null}
 
         {bgType === "gradient" ? (
-          <div className="space-y-3">
-            <Select
-              label="Preset de degradado"
-              selectedKeys={[
-                GRADIENT_PRESETS.some((p) => p.value === bgGradient)
-                  ? bgGradient
-                  : "custom",
-              ]}
-              onSelectionChange={(keys) => {
-                const val = String(Array.from(keys)[0]);
-                if (val !== "custom") {
-                  set("bgGradient", val);
-                  set("textColor", "light");
-                }
-              }}
-            >
-              {GRADIENT_PRESETS.map((preset) => (
-                <SelectItem key={preset.value}>{preset.name}</SelectItem>
-              ))}
-            </Select>
+          <div className="space-y-4 rounded-xl border border-[var(--app-line)] bg-white/50 p-3.5">
+            <div>
+              <p className="text-xs font-semibold text-[var(--app-muted)] mb-2">
+                1. Elige una combinación lista
+              </p>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                {GRADIENT_PRESETS.map((preset) => (
+                  <button
+                    key={preset.value}
+                    type="button"
+                    className={`flex flex-col items-start gap-1 rounded-lg border p-2 text-left transition-all ${
+                      bgGradient === preset.value
+                        ? "border-[var(--app-primary)] ring-2 ring-[var(--app-primary)]/20"
+                        : "border-[var(--app-line)] hover:border-black/30"
+                    }`}
+                    onClick={() => {
+                      set("bgGradient", preset.value);
+                      set("textColor", "light");
+                    }}
+                  >
+                    <div
+                      className="h-7 w-full rounded-md border border-black/10 shadow-xs"
+                      style={{ backgroundImage: preset.value }}
+                    />
+                    <span className="truncate text-[11px] font-medium text-[var(--app-ink)]">
+                      {preset.name}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
 
-            <div
-              className="h-12 w-full rounded-xl border border-black/10 shadow-xs"
-              style={{ backgroundImage: bgGradient }}
-            />
+            <div className="space-y-2 border-t border-[var(--app-line)] pt-3">
+              <p className="text-xs font-semibold text-[var(--app-muted)]">
+                2. O crea tu propio degradado
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label
+                    className="text-[11px] text-[var(--app-muted)]"
+                    htmlFor="gradient-start-color"
+                  >
+                    Color inicial
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      id="gradient-start-color"
+                      type="color"
+                      value={colorA}
+                      onChange={(e) => {
+                        const newA = e.target.value;
+                        setColorA(newA);
+                        set("bgGradient", `linear-gradient(${direction}, ${newA} 0%, ${colorB} 100%)`);
+                      }}
+                      className="size-8 cursor-pointer rounded-md border border-[var(--app-line)] bg-transparent p-0.5"
+                    />
+                    <span className="font-mono text-xs text-[var(--app-ink)]">{colorA}</span>
+                  </div>
+                </div>
 
-            <Input
-              label="CSS de degradado personalizado"
-              size="sm"
-              value={bgGradient}
-              onValueChange={(val) => set("bgGradient", val)}
-            />
+                <div className="space-y-1">
+                  <label
+                    className="text-[11px] text-[var(--app-muted)]"
+                    htmlFor="gradient-end-color"
+                  >
+                    Color final
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      id="gradient-end-color"
+                      type="color"
+                      value={colorB}
+                      onChange={(e) => {
+                        const newB = e.target.value;
+                        setColorB(newB);
+                        set("bgGradient", `linear-gradient(${direction}, ${colorA} 0%, ${newB} 100%)`);
+                      }}
+                      className="size-8 cursor-pointer rounded-md border border-[var(--app-line)] bg-transparent p-0.5"
+                    />
+                    <span className="font-mono text-xs text-[var(--app-ink)]">{colorB}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="pt-1">
+                <p className="text-[11px] text-[var(--app-muted)] block mb-1.5">
+                  Dirección del degradado
+                </p>
+                <div
+                  aria-label="Dirección del degradado"
+                  className="grid grid-cols-4 gap-1.5"
+                  role="group"
+                >
+                  {[
+                    { label: "Diagonal ↘", angle: "135deg" },
+                    { label: "Vertical ↓", angle: "180deg" },
+                    { label: "Horizontal →", angle: "90deg" },
+                    { label: "Diagonal ↗", angle: "45deg" },
+                  ].map((dir) => (
+                    <Button
+                      key={dir.angle}
+                      size="sm"
+                      variant={direction === dir.angle ? "solid" : "bordered"}
+                      color={direction === dir.angle ? "primary" : "default"}
+                      className="text-[11px] h-8 px-1"
+                      onPress={() => {
+                        setDirection(dir.angle);
+                        set("bgGradient", `linear-gradient(${dir.angle}, ${colorA} 0%, ${colorB} 100%)`);
+                      }}
+                    >
+                      {dir.label}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-1 border-t border-[var(--app-line)] pt-3">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-medium text-[var(--app-muted)]">
+                  Vista previa de este bloque
+                </span>
+                <Button
+                  size="sm"
+                  variant="light"
+                  className="h-6 text-[11px] text-[var(--app-muted)]"
+                  onPress={() => setShowAdvancedCss(!showAdvancedCss)}
+                  endContent={showAdvancedCss ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                >
+                  Personalización avanzada
+                </Button>
+              </div>
+              <div
+                className="h-10 w-full rounded-lg border border-black/10 shadow-xs"
+                style={{ backgroundImage: bgGradient }}
+              />
+
+              {showAdvancedCss ? (
+                <div className="pt-2">
+                  <Input
+                    label="Código CSS personalizado"
+                    size="sm"
+                    value={bgGradient}
+                    onValueChange={(val) => set("bgGradient", val)}
+                  />
+                </div>
+              ) : null}
+            </div>
           </div>
         ) : null}
 

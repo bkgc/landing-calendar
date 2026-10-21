@@ -5,6 +5,7 @@ import {
   BUSINESS_TIME_ZONE,
   businessDateAndTime,
   dateWithBusinessTime,
+  getDayOfWeekInBusinessTz,
 } from "@/lib/utils/date";
 import type { BusinessHours } from "@/types/business";
 
@@ -37,12 +38,16 @@ export async function getAvailableSlots({
   date,
   serviceDuration,
   bufferTime = 0,
+  excludeAppointmentId,
+  excludeGoogleEventId,
 }: {
   businessId: string;
   staffId?: string;
   date: string;
   serviceDuration: number;
   bufferTime?: number;
+  excludeAppointmentId?: string;
+  excludeGoogleEventId?: string;
 }) {
   const database = getAdminFirestore();
   const hoursSnapshot = await database
@@ -52,7 +57,8 @@ export async function getAvailableSlots({
     ...DEFAULT_HOURS,
     ...(hoursSnapshot.data() as Partial<BusinessHours> | undefined),
   };
-  const day = hours[DAY_KEYS[dateWithBusinessTime(date, "12:00").getDay()]];
+  const dayIndex = getDayOfWeekInBusinessTz(date);
+  const day = hours[DAY_KEYS[dayIndex]];
   if (!day?.enabled) return [];
 
   const [year, month, dayNumber] = date.split("-").map(Number);
@@ -63,18 +69,40 @@ export async function getAvailableSlots({
 
   if (staffId) {
     const calendarId = await getStaffCalendarId(businessId, staffId);
+    const queryCalendarId = calendarId || "primary";
     try {
       const calendar = await getGoogleClient(businessId);
-      const response = await calendar.freebusy.query({
-        requestBody: {
+      if (excludeGoogleEventId) {
+        const response = await calendar.events.list({
+          calendarId: queryCalendarId,
           timeMin: open.toISOString(),
           timeMax: close.toISOString(),
-          items: [{ id: calendarId || "primary" }],
-        },
-      });
-      for (const item of response.data.calendars?.[calendarId]?.busy || []) {
-        if (item.start && item.end)
-          busy.push({ start: new Date(item.start), end: new Date(item.end) });
+          singleEvents: true,
+          orderBy: "startTime",
+        });
+        for (const event of response.data.items || []) {
+          if (event.id === excludeGoogleEventId) continue;
+          const start = event.start?.dateTime || event.start?.date;
+          const end = event.end?.dateTime || event.end?.date;
+          if (start && end)
+            busy.push({ start: new Date(start), end: new Date(end) });
+        }
+      } else {
+        const response = await calendar.freebusy.query({
+          requestBody: {
+            timeMin: open.toISOString(),
+            timeMax: close.toISOString(),
+            items: [{ id: queryCalendarId }],
+          },
+        });
+        const busyList =
+          response.data.calendars?.[queryCalendarId]?.busy ||
+          response.data.calendars?.["primary"]?.busy ||
+          [];
+        for (const item of busyList) {
+          if (item.start && item.end)
+            busy.push({ start: new Date(item.start), end: new Date(item.end) });
+        }
       }
     } catch {
       // Horarios configurados siguen funcionando como fallback si Google no está conectado.
@@ -85,6 +113,7 @@ export async function getAvailableSlots({
       .where("status", "==", "confirmed")
       .get();
     appointments.docs.forEach((document) => {
+      if (document.id === excludeAppointmentId) return;
       const appointment = document.data();
       const start = new Date(appointment.start);
       if (businessDateAndTime(start).date === date)

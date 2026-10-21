@@ -1,6 +1,6 @@
 "use client";
 
-import type { Business } from "@/types/business";
+import type { Business, BusinessHours } from "@/types/business";
 import {
   BLOCK_LABELS,
   type BookingCalendarBlockProps,
@@ -52,6 +52,7 @@ export interface BlockRendererProps {
   config: LandingConfig;
   services: Service[];
   staff: StaffMember[];
+  businessHours?: BusinessHours;
   preview?: boolean;
   editorMode?: boolean;
 }
@@ -61,6 +62,7 @@ export function BlockRenderer({
   config,
   services,
   staff,
+  businessHours,
   preview = false,
   editorMode = false,
 }: BlockRendererProps) {
@@ -73,6 +75,7 @@ export function BlockRenderer({
           business={business}
           services={services}
           staff={staff}
+          businessHours={businessHours}
           preview={preview}
           editorMode={editorMode}
         />
@@ -86,6 +89,7 @@ export function BlockView({
   business,
   services,
   staff,
+  businessHours,
   preview,
   editorMode,
 }: {
@@ -93,6 +97,7 @@ export function BlockView({
   business: Business;
   services: Service[];
   staff: StaffMember[];
+  businessHours?: BusinessHours;
   preview: boolean;
   editorMode: boolean;
 }) {
@@ -105,6 +110,7 @@ export function BlockView({
     business,
     services,
     staff,
+    businessHours,
     preview,
     editorMode,
   });
@@ -203,6 +209,7 @@ function renderBlockContent({
   business,
   services,
   staff,
+  businessHours,
   preview,
   editorMode,
 }: {
@@ -210,6 +217,7 @@ function renderBlockContent({
   business: Business;
   services: Service[];
   staff: StaffMember[];
+  businessHours?: BusinessHours;
   preview: boolean;
   editorMode: boolean;
 }) {
@@ -239,8 +247,10 @@ function renderBlockContent({
       return (
         <BookingCalendarBlock
           businessId={business.id}
+          businessWhatsapp={business.whatsapp}
           services={services}
           staff={staff}
+          businessHours={businessHours}
           preview={preview || editorMode}
           {...(block.props as unknown as BookingCalendarBlockProps)}
         />

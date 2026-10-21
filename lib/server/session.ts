@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 
 import { getAdminAuth, getAdminFirestore } from "@/lib/firebase/admin";
+import { hasCurrentSubscription } from "@/lib/utils/subscription";
 import type { Business, UserProfile } from "@/types/business";
 
 export interface ServerSession {
@@ -52,18 +53,11 @@ export async function requireServerSession() {
 }
 
 export function hasActiveSubscription(business: Business) {
-  if (business.subscriptionStatus === "active") return true;
-  if (business.subscriptionStatus !== "trialing") return false;
-  const trialEndsAt = business.trialEndsAt as unknown as {
-    toMillis?: () => number;
-    seconds?: number;
-  };
-  const timestamp =
-    trialEndsAt?.toMillis?.() ||
-    (trialEndsAt?.seconds
-      ? trialEndsAt.seconds * 1000
-      : new Date(business.trialEndsAt as unknown as string).getTime());
-  return timestamp > Date.now();
+  return hasCurrentSubscription(
+    business.subscriptionStatus,
+    business.trialEndsAt,
+    business.currentPeriodEnd,
+  );
 }
 
 export async function requireEntitledSession() {

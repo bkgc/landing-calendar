@@ -139,14 +139,16 @@ export default function Home() {
             <div className="flex items-center justify-between border-b border-[#edf1ef] px-6 py-5">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#11766f]">
-                  Hoy, martes 18
+                  Agenda de ejemplo
                 </p>
                 <h2 className="mt-1 text-xl font-semibold">Tu agenda</h2>
               </div>
               <Button
+                as={Link}
                 isIconOnly
                 aria-label="Abrir agenda"
                 className="text-[#11766f]"
+                href="/register"
                 variant="flat"
               >
                 <CalendarDays size={19} />
@@ -183,7 +185,7 @@ export default function Home() {
               <Button
                 as={Link}
                 className="mt-2 w-full"
-                href="/register"
+                href="#como-funciona"
                 variant="flat"
                 endContent={<ArrowUpRight size={16} />}
               >

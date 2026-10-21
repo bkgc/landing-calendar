@@ -4,35 +4,22 @@ import { getAdminFirestore } from "@/lib/firebase/admin";
 import { getStaffCalendarId } from "@/lib/google/calendar";
 import { getAvailableSlots } from "@/lib/google/availability";
 import { fail, ok, unknownError } from "@/lib/server/api";
+import { getAppointmentLockReferences } from "@/lib/server/appointment-locks";
 import { requireServerSession } from "@/lib/server/session";
+import { businessDateAndTime } from "@/lib/utils/date";
 
-const patchSchema = z.object({
-  status: z.enum(["cancelled", "completed", "no_show", "confirmed"]).optional(),
-  start: z.string().datetime().optional(),
-  end: z.string().datetime().optional(),
-});
-
-function localSlot(value: string) {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/La_Paz",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(new Date(value));
-  const get = (type: string) =>
-    parts.find((part) => part.type === type)?.value || "";
-  return {
-    date: `${get("year")}-${get("month")}-${get("day")}`,
-    time: `${get("hour")}:${get("minute")}`,
-  };
-}
-
-function lockPath(staffId: string, date: string, time: string) {
-  return `appointmentLocks/${staffId}_${date}_${time.replace(":", "-")}`;
-}
+const patchSchema = z
+  .object({
+    status: z.enum(["cancelled", "completed", "no_show", "confirmed"]).optional(),
+    start: z.string().datetime().optional(),
+    end: z.string().datetime().optional(),
+  })
+  .refine(
+    (value) =>
+      (value.start === undefined && value.end === undefined) ||
+      (value.start !== undefined && value.end !== undefined),
+    "La fecha de inicio y fin deben enviarse juntas.",
+  );
 
 export async function PATCH(
   request: Request,
@@ -42,12 +29,15 @@ export async function PATCH(
     const session = await requireServerSession();
     const { appointmentId } = await params;
     const input = patchSchema.safeParse(await request.json());
-    if (!input.success) return fail("Estado inválido.");
-    const reference = getAdminFirestore().doc(
+    if (!input.success) return fail(input.error.issues[0]?.message || "Datos inválidos.");
+
+    const database = getAdminFirestore();
+    const reference = database.doc(
       `businesses/${session.business.id}/appointments/${appointmentId}`,
     );
     const snapshot = await reference.get();
     if (!snapshot.exists) return fail("Cita no encontrada.", 404);
+
     const current = snapshot.data() as {
       staffId: string;
       serviceId: string;
@@ -57,53 +47,130 @@ export async function PATCH(
       googleEventId?: string;
       calendarId?: string;
     };
-    const updates = { ...input.data, updatedAt: new Date() };
-    if (input.data.start && input.data.end) {
-      const serviceSnapshot = await getAdminFirestore()
-        .doc(`businesses/${session.business.id}/services/${current.serviceId}`)
-        .get();
-      const service = serviceSnapshot.data() as {
-        duration: number;
-        bufferTime?: number;
-      };
-      const requested = localSlot(input.data.start);
+    const serviceSnapshot = await database
+      .doc(`businesses/${session.business.id}/services/${current.serviceId}`)
+      .get();
+    if (!serviceSnapshot.exists) return fail("El servicio de esta cita ya no existe.", 409);
+    const service = serviceSnapshot.data() as {
+      duration: number;
+      bufferTime?: number;
+    };
+    const requestedStart = input.data.start || current.start;
+    const requestedStartDate = new Date(requestedStart);
+    const requestedEnd = input.data.end || current.end;
+    const expectedEnd = new Date(
+      requestedStartDate.getTime() + service.duration * 60_000,
+    );
+    if (
+      !Number.isFinite(requestedStartDate.getTime()) ||
+      new Date(requestedEnd).getTime() !== expectedEnd.getTime()
+    ) {
+      return fail("La duración de la cita no coincide con el servicio.", 400);
+    }
+
+    const currentSlot = businessDateAndTime(current.start);
+    const requestedSlot = businessDateAndTime(requestedStart);
+    const startChanged =
+      currentSlot.date !== requestedSlot.date ||
+      currentSlot.time !== requestedSlot.time;
+    const nextStatus = input.data.status || current.status;
+    const wasConfirmed = current.status === "confirmed";
+    const willBeConfirmed = nextStatus === "confirmed";
+
+    if (willBeConfirmed && (!wasConfirmed || startChanged)) {
       const slots = await getAvailableSlots({
         businessId: session.business.id,
         staffId: current.staffId,
-        date: requested.date,
+        date: requestedSlot.date,
         serviceDuration: service.duration,
         bufferTime: service.bufferTime || 0,
+        excludeAppointmentId: appointmentId,
+        excludeGoogleEventId: current.googleEventId,
       });
-      if (!slots.includes(requested.time))
+      if (!slots.includes(requestedSlot.time))
         return fail("Ese horario ya no está disponible.", 409);
-      const old = localSlot(current.start);
-      const oldLock = getAdminFirestore().doc(
-        `businesses/${session.business.id}/${lockPath(current.staffId, old.date, old.time)}`,
-      );
-      const newLock = getAdminFirestore().doc(
-        `businesses/${session.business.id}/${lockPath(current.staffId, requested.date, requested.time)}`,
-      );
-      await getAdminFirestore().runTransaction(async (transaction) => {
-        const newLockSnapshot = await transaction.get(newLock);
-        if (newLock.path !== oldLock.path && newLockSnapshot.exists)
-          throw new Error("Ese horario ya fue reservado.");
-        if (newLock.path !== oldLock.path) {
-          transaction.delete(oldLock);
-          transaction.create(newLock, { appointmentId, createdAt: new Date() });
-        }
-        transaction.update(reference, updates);
-      });
-    } else {
-      const old = localSlot(current.start);
-      const oldLock = getAdminFirestore().doc(
-        `businesses/${session.business.id}/${lockPath(current.staffId, old.date, old.time)}`,
-      );
-      await getAdminFirestore().runTransaction(async (transaction) => {
-        if (input.data.status === "cancelled") transaction.delete(oldLock);
-        transaction.update(reference, updates);
-      });
     }
-    if (input.data.start && input.data.end && snapshot.data()?.googleEventId) {
+
+    const oldLocks = wasConfirmed
+      ? getAppointmentLockReferences(
+          database,
+          session.business.id,
+          current.staffId,
+          currentSlot.date,
+          currentSlot.time,
+          service.duration + (service.bufferTime || 0),
+        )
+      : [];
+    const newLocks = willBeConfirmed
+      ? getAppointmentLockReferences(
+          database,
+          session.business.id,
+          current.staffId,
+          requestedSlot.date,
+          requestedSlot.time,
+          service.duration + (service.bufferTime || 0),
+        )
+      : [];
+    const lockRefs = Array.from(
+      new Map<string, FirebaseFirestore.DocumentReference>(
+        [...oldLocks, ...newLocks].map(
+          (lock): [string, FirebaseFirestore.DocumentReference] => [
+            lock.path,
+            lock,
+          ],
+        ),
+      ).values(),
+    );
+    const updatedStart = input.data.start || current.start;
+    const updatedEnd = input.data.start
+      ? expectedEnd.toISOString()
+      : current.end;
+
+    await database.runTransaction(async (transaction) => {
+      const existingLocks = new Map<
+        string,
+        FirebaseFirestore.DocumentSnapshot
+      >();
+      for (const lock of lockRefs) {
+        existingLocks.set(lock.path, await transaction.get(lock));
+      }
+
+      for (const lock of newLocks) {
+        const existing = existingLocks.get(lock.path);
+        if (
+          existing?.exists &&
+          existing.data()?.appointmentId !== appointmentId
+        ) {
+          throw new Error("Ese horario ya fue reservado.");
+        }
+      }
+
+      for (const lock of oldLocks) {
+        const existing = existingLocks.get(lock.path);
+        if (
+          existing?.exists &&
+          existing.data()?.appointmentId === appointmentId &&
+          !newLocks.some((newLock) => newLock.path === lock.path)
+        ) {
+          transaction.delete(lock);
+        }
+      }
+      for (const lock of newLocks) {
+        if (!existingLocks.get(lock.path)?.exists) {
+          transaction.create(lock, { appointmentId, createdAt: new Date() });
+        }
+      }
+
+      transaction.update(reference, {
+        ...input.data,
+        start: updatedStart,
+        end: updatedEnd,
+        status: nextStatus,
+        updatedAt: new Date(),
+      });
+    });
+
+    if (startChanged && current.googleEventId) {
       try {
         const { getGoogleClient } = await import("@/lib/google/client");
         const calendar = await getGoogleClient(session.business.id);
@@ -112,17 +179,18 @@ export async function PATCH(
           (await getStaffCalendarId(session.business.id, current.staffId));
         await calendar.events.patch({
           calendarId,
-          eventId: snapshot.data()?.googleEventId as string,
+          eventId: current.googleEventId,
           requestBody: {
-            start: { dateTime: input.data.start },
-            end: { dateTime: input.data.end },
+            start: { dateTime: updatedStart },
+            end: { dateTime: updatedEnd },
           },
         });
       } catch {
-        /* La fecha local permite operar incluso si Google está temporalmente indisponible. */
+        // La cita local continúa siendo operativa si Google no responde.
       }
     }
-    if (input.data.status === "cancelled" && current.googleEventId) {
+
+    if (nextStatus === "cancelled" && wasConfirmed && current.googleEventId) {
       try {
         const { getGoogleClient } = await import("@/lib/google/client");
         const calendar = await getGoogleClient(session.business.id);
@@ -134,11 +202,15 @@ export async function PATCH(
           eventId: current.googleEventId,
         });
       } catch {
-        /* El estado local sigue siendo la fuente operativa. */
+        // El estado local sigue siendo la fuente operativa.
       }
     }
-    return ok({ id: appointmentId, status: input.data.status });
+    return ok({ id: appointmentId, status: nextStatus });
   } catch (error) {
-    return unknownError(error);
+    const message =
+      error instanceof Error && error.message.includes("ya fue reservado")
+        ? error.message
+        : null;
+    return message ? fail(message, 409) : unknownError(error);
   }
 }

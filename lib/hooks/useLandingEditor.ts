@@ -128,12 +128,17 @@ export const useLandingEditor = create<LandingEditorState>((set, get) => {
     },
     save: async () => {
       if (saveTimer) clearTimeout(saveTimer);
+      if (get().saving) {
+        scheduleSave(get);
+        return;
+      }
+      const configToSave = copyConfig(get().config);
       set({ saving: true, saveState: "saving", saveError: null });
       try {
         const response = await fetch("/api/business/landing", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(get().config),
+          body: JSON.stringify(configToSave),
         });
         const result = (await response.json()) as {
           error?: string;
@@ -142,13 +147,16 @@ export const useLandingEditor = create<LandingEditorState>((set, get) => {
         if (!response.ok || !result.success) {
           throw new Error(result.error || "No se pudo guardar la página.");
         }
+        const hasPendingChanges =
+          JSON.stringify(get().config) !== JSON.stringify(configToSave);
         set({
           saving: false,
-          dirty: false,
-          saveState: "saved",
+          dirty: hasPendingChanges,
+          saveState: hasPendingChanges ? "idle" : "saved",
           saveError: null,
           lastSavedAt: new Date(),
         });
+        if (hasPendingChanges) scheduleSave(get);
       } catch (error) {
         const errorMsg =
           error instanceof Error

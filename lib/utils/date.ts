@@ -65,4 +65,9 @@ export function getBusinessWeek(date = new Date()) {
     ].join("-");
     return { dateKey, date: day };
   });
+}export function getDayOfWeekInBusinessTz(dateStr: string): number {
+  const [year, month, day] = dateStr.split("-").map(Number);
+  if (!year || !month || !day) return 0;
+  // Usamos Date.UTC a las 12:00 para evitar cualquier desajuste de huso horario
+  return new Date(Date.UTC(year, month - 1, day, 12, 0, 0)).getUTCDay();
 }

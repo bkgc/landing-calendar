@@ -54,16 +54,7 @@ export async function GET(request: Request) {
       state,
     });
 
-    const response = NextResponse.redirect(authUrl);
-    response.cookies.set("google_oauth_state", state, {
-      httpOnly: true,
-      sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
-      maxAge: 900,
-      path: "/",
-    });
-
-    return response;
+    return NextResponse.redirect(authUrl);
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Error al iniciar OAuth";

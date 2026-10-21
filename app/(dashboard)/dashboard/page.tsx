@@ -12,6 +12,7 @@ import { useEffect, useState } from "react";
 
 import { Button, Card, CardBody, Chip, Progress } from "@/components/ui";
 import { useAuth } from "@/lib/hooks/useAuth";
+import { businessDateAndTime } from "@/lib/utils/date";
 
 export default function DashboardPage() {
   const { business, user } = useAuth();
@@ -32,7 +33,7 @@ export default function DashboardPage() {
   useEffect(() => {
     let isMounted = true;
     Promise.all([
-      fetch("/api/appointments")
+      fetch("/api/appointments?limit=300")
         .then((r) => r.json())
         .catch(() => ({ success: false, data: [] })),
       fetch("/api/business/services")
@@ -44,19 +45,17 @@ export default function DashboardPage() {
     ]).then(([appointmentsRes, servicesRes, staffRes]) => {
       if (!isMounted) return;
       const now = new Date();
-      const currentYear = now.getFullYear();
-      const currentMonth = now.getMonth();
+      const currentMonth = businessDateAndTime(now).date.slice(0, 7);
 
       let appointmentsCount = 0;
-      if (appointmentsRes.success && Array.isArray(appointmentsRes.data)) {
-        appointmentsCount = appointmentsRes.data.filter(
+      if (
+        appointmentsRes.success &&
+        Array.isArray(appointmentsRes.data?.items)
+      ) {
+        appointmentsCount = appointmentsRes.data.items.filter(
           (apt: { start?: string; status?: string }) => {
             if (!apt.start || apt.status === "cancelled") return false;
-            const aptDate = new Date(apt.start);
-            return (
-              aptDate.getFullYear() === currentYear &&
-              aptDate.getMonth() === currentMonth
-            );
+            return businessDateAndTime(apt.start).date.startsWith(currentMonth);
           },
         ).length;
       }
@@ -119,10 +118,10 @@ export default function DashboardPage() {
     },
   ];
 
-  let setupProgress = 25;
+  let setupProgress = business?.slug ? 25 : 0;
   if (statsData.servicesCount > 0) setupProgress += 25;
   if (statsData.staffCount > 0) setupProgress += 25;
-  if (statsData.appointmentsCount > 0 || business?.slug) setupProgress += 25;
+  if (business?.googleCalendarConnected) setupProgress += 25;
   setupProgress = Math.min(100, setupProgress);
 
   return (
@@ -255,7 +254,7 @@ export default function DashboardPage() {
                   variant="flat"
                 >
                   <span>
-                    <span className="block font-medium">Conecta tu agenda</span>
+                    <span className="block font-medium">                    Conecta Google Calendar</span>
                     <span className="mt-1 block text-xs font-normal text-[var(--app-muted)]">
                       Evita cruces de horario
                     </span>

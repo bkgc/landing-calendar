@@ -1,5 +1,6 @@
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { getAdminFirestore } from "@/lib/firebase/admin";
+import { timestampToMillis } from "@/lib/utils/subscription";
 
 export interface PlanDefinition {
   id: "free" | "pro";
@@ -48,16 +49,15 @@ export function getLibelulaConfig() {
   const apiUrl = (
     process.env.API_LIBELULA ||
     process.env.LIBELULA_API_URL ||
-    (process.env.LIBELULA_WEBHOOK_SECRET?.startsWith("http")
-      ? process.env.LIBELULA_WEBHOOK_SECRET
-      : null) ||
     "https://api.todotix.com/rest/deuda"
   ).replace(/\/$/, "");
 
   const appKey =
     process.env.APPKEY_LIBELULA ||
-    process.env.LIBELULA_API_KEY ||
-    "11bb10ce-68ba-4af1-8eb7-4e6624fed729";
+    process.env.LIBELULA_API_KEY;
+  if (!appKey) {
+    throw new Error("Falta configurar APPKEY_LIBELULA.");
+  }
 
   return { apiUrl, appKey };
 }
@@ -76,9 +76,6 @@ export async function createSubscriptionPayment({
   planId,
 }: CreateSubscriptionPaymentInput) {
   const { apiUrl, appKey } = getLibelulaConfig();
-  if (!appKey) {
-    throw new Error("Falta configurar APPKEY_LIBELULA en el archivo .env.local.");
-  }
 
   const paymentId = randomUUID();
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -174,15 +171,27 @@ export async function checkLibelulaPayment(paymentId: string) {
 
   const paymentData = paymentSnap.data() as {
     businessId: string;
+    userId: string;
     status: string;
     plan: string;
     amount: number;
+    expiresAt?: {
+      toMillis?: () => number;
+      seconds?: number;
+    } | Date | string;
   };
 
   if (paymentData.status === "confirmed") {
     return {
       paid: true,
       status: "confirmed" as const,
+      businessId: paymentData.businessId,
+    };
+  }
+  if (paymentData.status === "expired") {
+    return {
+      paid: false,
+      status: "expired" as const,
       businessId: paymentData.businessId,
     };
   }
@@ -212,27 +221,64 @@ export async function checkLibelulaPayment(paymentId: string) {
 
   const isPaid = Boolean(result?.datos?.pagado);
   const isExpired = Boolean(result?.datos?.deuda_expirada);
+  if (result.error) {
+    throw new Error(result.mensaje || "Libélula no pudo consultar el pago.");
+  }
+  const expiryTimestamp = timestampToMillis(paymentData.expiresAt);
+  const expiryMillis = Number.isFinite(expiryTimestamp)
+    ? expiryTimestamp
+    : Number.POSITIVE_INFINITY;
+  const locallyExpired = expiryMillis <= Date.now();
 
   if (isPaid) {
     const now = new Date();
-    const periodEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 días
+    const businessRef = db.doc(`businesses/${paymentData.businessId}`);
+    const alreadyApplied = await db.runTransaction(async (transaction) => {
+      const [currentPayment, businessSnapshot] = await Promise.all([
+        transaction.get(paymentRef),
+        transaction.get(businessRef),
+      ]);
+      if (!currentPayment.exists || !businessSnapshot.exists) {
+        throw new Error("No se encontró el negocio o pago asociado.");
+      }
+      if (currentPayment.data()?.status === "confirmed") return true;
+      if (currentPayment.data()?.status !== "pending") return false;
 
-    const batch = db.batch();
-    batch.update(paymentRef, {
-      status: "confirmed",
-      confirmedAt: now,
-      updatedAt: now,
+      const currentPeriodEnd = businessSnapshot.data()?.currentPeriodEnd;
+      const currentPeriodEndDate =
+        currentPeriodEnd && typeof currentPeriodEnd.toDate === "function"
+          ? currentPeriodEnd.toDate()
+          : currentPeriodEnd instanceof Date
+            ? currentPeriodEnd
+            : currentPeriodEnd
+              ? new Date(currentPeriodEnd)
+              : now;
+      const baseDate =
+        currentPeriodEndDate > now ? currentPeriodEndDate : now;
+      const periodEnd = new Date(baseDate.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+      transaction.update(paymentRef, {
+        status: "confirmed",
+        confirmedAt: now,
+        updatedAt: now,
+      });
+      transaction.update(businessRef, {
+        subscriptionStatus: "active",
+        plan: "pro",
+        libelulaPaymentId: paymentId,
+        currentPeriodEnd: periodEnd,
+        updatedAt: now,
+      });
+      return true;
     });
 
-    batch.update(db.doc(`businesses/${paymentData.businessId}`), {
-      subscriptionStatus: "active",
-      plan: "pro",
-      libelulaPaymentId: paymentId,
-      currentPeriodEnd: periodEnd,
-      updatedAt: now,
-    });
-
-    await batch.commit();
+    if (!alreadyApplied) {
+      return {
+        paid: false,
+        status: "expired" as const,
+        businessId: paymentData.businessId,
+      };
+    }
 
     return {
       paid: true,
@@ -241,7 +287,7 @@ export async function checkLibelulaPayment(paymentId: string) {
     };
   }
 
-  if (isExpired) {
+  if (isExpired || locallyExpired) {
     await paymentRef.update({
       status: "expired",
       updatedAt: new Date(),
@@ -265,10 +311,12 @@ export function verifyWebhookSignature(
   signature: string | null,
 ) {
   if (!process.env.LIBELULA_WEBHOOK_SECRET || !signature) return false;
+  const normalizedSignature = signature.replace(/^sha256=/i, "");
+  if (!/^[a-f0-9]{64}$/i.test(normalizedSignature)) return false;
   const expected = createHmac("sha256", process.env.LIBELULA_WEBHOOK_SECRET)
     .update(payload)
     .digest("hex");
-  const left = Buffer.from(expected);
-  const right = Buffer.from(signature);
+  const left = Buffer.from(expected, "hex");
+  const right = Buffer.from(normalizedSignature, "hex");
   return left.length === right.length && timingSafeEqual(left, right);
 }

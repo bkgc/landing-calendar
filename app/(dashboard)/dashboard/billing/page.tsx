@@ -26,6 +26,7 @@ import {
   Spinner,
 } from "@heroui/react";
 import { useAuth } from "@/lib/hooks/useAuth";
+import { hasCurrentSubscription } from "@/lib/utils/subscription";
 import type { PlanDefinition } from "@/lib/libelula/client";
 
 interface PaymentInfo {
@@ -80,7 +81,7 @@ export default function BillingPage() {
           stopPolling();
           setPaymentSuccess(true);
           await refresh();
-        } else if (result.success && result.data.expired) {
+        } else if (result.success && result.data.status === "expired") {
           stopPolling();
           setErrorMessage("El código QR ha expirado. Por favor genera uno nuevo.");
         }
@@ -146,8 +147,14 @@ export default function BillingPage() {
     setPaymentInfo(null);
   };
 
-  const isProActive =
-    business?.plan === "pro" && business?.subscriptionStatus === "active";
+  const isProActive = Boolean(
+    business?.plan === "pro" &&
+      hasCurrentSubscription(
+        business.subscriptionStatus,
+        business.trialEndsAt,
+        business.currentPeriodEnd,
+      ),
+  );
 
   const periodEndFormatted = business?.currentPeriodEnd?.toDate
     ? business.currentPeriodEnd

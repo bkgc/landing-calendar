@@ -5,6 +5,7 @@ import {
   CalendarClock,
   CalendarDays,
   Check,
+  ChevronDown,
   Clock,
   Plus,
   RefreshCw,
@@ -67,6 +68,10 @@ export default function AppointmentsPage() {
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [selectedDate, setSelectedDate] = useState(currentDate);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [hasMoreAppointments, setHasMoreAppointments] = useState(false);
 
   // Filtros
   const [statusFilter, setStatusFilter] = useState<
@@ -106,15 +111,41 @@ export default function AppointmentsPage() {
     setLoading(true);
     try {
       const [appointmentsRes, servicesRes, staffRes] = await Promise.all([
-        fetch("/api/appointments").then((r) => r.json()).catch(() => ({ success: false, data: [] })),
+        fetch("/api/appointments?limit=100").then((r) => r.json()).catch(() => ({ success: false, data: [] })),
         fetch("/api/business/services").then((r) => r.json()).catch(() => ({ success: false, data: [] })),
         fetch("/api/business/staff").then((r) => r.json()).catch(() => ({ success: false, data: [] })),
       ]);
-      if (appointmentsRes.success) setAppointments(appointmentsRes.data);
+      if (appointmentsRes.success) {
+        setAppointments(appointmentsRes.data.items);
+        setNextCursor(appointmentsRes.data.nextCursor);
+        setHasMoreAppointments(appointmentsRes.data.hasMore);
+      }
       if (servicesRes.success) setServices(servicesRes.data);
       if (staffRes.success) setStaff(staffRes.data);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadMoreAppointments = async () => {
+    if (!nextCursor || loadingMore) return;
+    setLoadingMore(true);
+    setLoadMoreError(null);
+    try {
+      const response = await fetch(
+        `/api/appointments?limit=100&cursor=${encodeURIComponent(nextCursor)}`,
+      );
+      const result = await response.json();
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || "No se pudieron cargar más citas.");
+      }
+      setAppointments((current) => [...current, ...result.data.items]);
+      setNextCursor(result.data.nextCursor);
+      setHasMoreAppointments(result.data.hasMore);
+    } catch {
+      setLoadMoreError("No se pudieron cargar más citas. Intenta nuevamente.");
+    } finally {
+      setLoadingMore(false);
     }
   };
 
@@ -142,6 +173,15 @@ export default function AppointmentsPage() {
 
   const filteredAppointments = selectedAppointments.filter((apt) =>
     statusFilter === "all" ? true : apt.status === statusFilter,
+  );
+  const newAppointmentService = services.find(
+    (service) => service.id === newServiceId,
+  );
+  const eligibleManualStaff = staff.filter(
+    (member) =>
+      member.active &&
+      (!newAppointmentService?.staffIds?.length ||
+        newAppointmentService.staffIds.includes(member.id)),
   );
 
   const update = async (id: string, status: string) => {
@@ -185,8 +225,8 @@ export default function AppointmentsPage() {
       .then((r) => r.json())
       .then((res) => {
         if (!isMounted) return;
-        if (res.success && Array.isArray(res.data)) {
-          setRescheduleSlots(res.data);
+        if (res.success && Array.isArray(res.data?.slots)) {
+          setRescheduleSlots(res.data.slots);
         } else {
           setRescheduleSlots([]);
         }
@@ -272,8 +312,8 @@ export default function AppointmentsPage() {
       .then((r) => r.json())
       .then((res) => {
         if (!isMounted) return;
-        if (res.success && Array.isArray(res.data)) {
-          setNewSlots(res.data);
+        if (res.success && Array.isArray(res.data?.slots)) {
+          setNewSlots(res.data.slots);
         } else {
           setNewSlots([]);
         }
@@ -295,8 +335,8 @@ export default function AppointmentsPage() {
     setNewClientName("");
     setNewClientPhone("");
     setNewClientEmail("");
-    const defaultService = services.find((s) => s.active !== false);
-    setNewServiceId(defaultService?.id || (services[0]?.id ?? ""));
+    const defaultService = services.find((s) => s.active);
+    setNewServiceId(defaultService?.id || "");
     setNewStaffId("");
     setNewDate(selectedDate);
     setNewSelectedSlot("");
@@ -429,7 +469,7 @@ export default function AppointmentsPage() {
                 {weekAppointments.length} en la semana
               </Chip>
             </div>
-            <div className="grid min-w-[840px] grid-cols-7 divide-x divide-[var(--app-line)]">
+            <div className="hidden min-w-[840px] grid-cols-7 divide-x divide-[var(--app-line)] xl:grid">
               {week.map((day) => {
                 const dayAppointments = appointments
                   .filter(
@@ -473,6 +513,37 @@ export default function AppointmentsPage() {
                         <p className="text-xs text-[var(--app-muted)]">Libre</p>
                       )}
                     </div>
+                  </Button>
+                );
+              })}
+            </div>
+            <div className="grid grid-cols-2 gap-2 p-3 sm:grid-cols-4 xl:hidden">
+              {week.map((day) => {
+                const dayAppointments = appointments.filter(
+                  (appointment) =>
+                    businessDateAndTime(appointment.start).date === day.dateKey,
+                );
+                const selected = day.dateKey === selectedDate;
+                return (
+                  <Button
+                    key={day.dateKey}
+                    className={`h-auto min-w-0 flex-col items-start gap-1 p-3 text-left ${selected ? "bg-[var(--app-primary-soft)]" : "bg-[var(--app-canvas)]"}`}
+                    variant="light"
+                    onPress={() => setSelectedDate(day.dateKey)}
+                  >
+                    <span className="text-xs font-semibold uppercase text-[var(--app-muted)]">
+                      {day.date.toLocaleDateString("es-BO", {
+                        weekday: "short",
+                      })}
+                    </span>
+                    <span className="text-lg font-semibold">
+                      {day.date.getDate()}
+                    </span>
+                    <span className="text-xs text-[var(--app-muted)]">
+                      {dayAppointments.length
+                        ? `${dayAppointments.length} cita${dayAppointments.length === 1 ? "" : "s"}`
+                        : "Libre"}
+                    </span>
                   </Button>
                 );
               })}
@@ -641,6 +712,21 @@ export default function AppointmentsPage() {
               </p>
             </div>
           )}
+          {hasMoreAppointments ? (
+            <div className="border-t border-[var(--app-line)] p-4 text-center">
+              {loadMoreError ? (
+                <p className="mb-3 text-sm text-danger">{loadMoreError}</p>
+              ) : null}
+              <Button
+                isLoading={loadingMore}
+                startContent={!loadingMore ? <ChevronDown size={16} /> : undefined}
+                variant="flat"
+                onPress={() => void loadMoreAppointments()}
+              >
+                Cargar citas anteriores
+              </Button>
+            </div>
+          ) : null}
         </CardBody>
       </Card>
 
@@ -723,10 +809,14 @@ export default function AppointmentsPage() {
             </div>
 
             <div>
-              <label className="text-xs font-semibold text-[var(--app-muted)] block mb-1.5">
+              <label
+                htmlFor="reschedule-date"
+                className="text-xs font-semibold text-[var(--app-muted)] block mb-1.5"
+              >
                 Selecciona la nueva fecha
               </label>
               <Input
+                id="reschedule-date"
                 type="date"
                 value={rescheduleDate}
                 min={currentDate()}
@@ -841,30 +931,42 @@ export default function AppointmentsPage() {
 
             <div className="grid gap-3 sm:grid-cols-2">
               <div>
-                <label className="text-xs font-semibold text-[var(--app-muted)] block mb-1.5">
+                <label
+                  htmlFor="new-appointment-service"
+                  className="text-xs font-semibold text-[var(--app-muted)] block mb-1.5"
+                >
                   Servicio
                 </label>
                 <select
+                  id="new-appointment-service"
                   className="w-full rounded-xl border border-[var(--app-line)] bg-white px-3 py-2.5 text-sm outline-none focus:border-[var(--app-primary)]"
                   value={newServiceId}
                   onChange={(e) => {
                     setNewServiceId(e.target.value);
+                    setNewStaffId("");
                     setNewSelectedSlot("");
                   }}
                 >
-                  {services.map((svc) => (
-                    <option key={svc.id} value={svc.id}>
-                      {svc.name} ({svc.duration} min - {svc.price} BOB)
-                    </option>
-                  ))}
+                  <option value="">Selecciona un servicio</option>
+                  {services
+                    .filter((svc) => svc.active)
+                    .map((svc) => (
+                      <option key={svc.id} value={svc.id}>
+                        {svc.name} ({svc.duration} min - {svc.price} BOB)
+                      </option>
+                    ))}
                 </select>
               </div>
 
               <div>
-                <label className="text-xs font-semibold text-[var(--app-muted)] block mb-1.5">
+                <label
+                  htmlFor="new-appointment-staff"
+                  className="text-xs font-semibold text-[var(--app-muted)] block mb-1.5"
+                >
                   Profesional (opcional)
                 </label>
                 <select
+                  id="new-appointment-staff"
                   className="w-full rounded-xl border border-[var(--app-line)] bg-white px-3 py-2.5 text-sm outline-none focus:border-[var(--app-primary)]"
                   value={newStaffId}
                   onChange={(e) => {
@@ -873,22 +975,24 @@ export default function AppointmentsPage() {
                   }}
                 >
                   <option value="">Cualquier profesional disponible</option>
-                  {staff
-                    .filter((m) => m.active !== false)
-                    .map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.name} ({m.role})
-                      </option>
-                    ))}
+                  {eligibleManualStaff.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.name} ({m.role})
+                    </option>
+                  ))}
                 </select>
               </div>
             </div>
 
             <div>
-              <label className="text-xs font-semibold text-[var(--app-muted)] block mb-1.5">
+              <label
+                htmlFor="new-appointment-date"
+                className="text-xs font-semibold text-[var(--app-muted)] block mb-1.5"
+              >
                 Fecha de la Cita
               </label>
               <Input
+                id="new-appointment-date"
                 type="date"
                 value={newDate}
                 min={currentDate()}

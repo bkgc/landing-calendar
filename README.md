@@ -107,6 +107,18 @@ cp .env.example .env.local
 npm run dev
 ```
 
+En producción, configura `GOOGLE_TOKEN_ENCRYPTION_KEY` con una clave aleatoria
+de 32 bytes codificada en 64 caracteres hexadecimales, además de
+`LIBELULA_WEBHOOK_SECRET` y la clave API de Libélula. Los webhooks se rechazan
+si la firma HMAC no es válida. Si rotas la clave de cifrado, conserva
+temporalmente la anterior en `GOOGLE_TOKEN_ENCRYPTION_KEY_LEGACY`; los tokens se
+vuelven a cifrar al renovarse. Retira la clave anterior cuando todos los tokens
+se hayan migrado o se hayan vuelto a conectar las cuentas.
+
+El limitador distribuido escribe contadores en la colección `rateLimits`, con
+el campo `expiresAt`. Configura una política TTL de Cloud Firestore en ese
+campo para eliminar automáticamente los contadores vencidos.
+
 ### Verificación de Calidad
 
 ```bash

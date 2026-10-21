@@ -3,6 +3,7 @@ import { z } from "zod";
 import { getAvailableSlots } from "@/lib/google/availability";
 import { fail, ok, unknownError } from "@/lib/server/api";
 import { rateLimit } from "@/lib/server/rate-limit";
+import { hasActiveSubscription } from "@/lib/server/session";
 
 const querySchema = z.object({
   businessId: z.string().min(1),
@@ -16,9 +17,16 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const input = querySchema.safeParse(Object.fromEntries(url.searchParams));
     if (!input.success) return fail("Parámetros de disponibilidad inválidos.");
-    const source = request.headers.get("x-forwarded-for") || "public";
+    const source =
+      request.headers.get("x-real-ip")?.trim() ||
+      request.headers.get("x-forwarded-for")?.split(",").at(-1)?.trim() ||
+      "unknown";
     if (
-      !rateLimit(`availability:${source}:${input.data.businessId}`, 60, 60_000)
+      !(await rateLimit(
+        `availability:${source}:${input.data.businessId}`,
+        60,
+        60_000,
+      ))
     )
       return fail(
         "Demasiadas consultas. Intenta nuevamente en un minuto.",
@@ -27,6 +35,13 @@ export async function GET(request: Request) {
 
     const admin = await import("@/lib/firebase/admin");
     const database = admin.getAdminFirestore();
+    const businessSnapshot = await database
+      .doc(`businesses/${input.data.businessId}`)
+      .get();
+    if (!businessSnapshot.exists)
+      return fail("Negocio no encontrado.", 404);
+    if (!hasActiveSubscription(businessSnapshot.data() as never))
+      return fail("Este negocio no acepta nuevas reservas.", 402);
 
     const serviceSnapshot = await database
       .doc(
@@ -39,19 +54,34 @@ export async function GET(request: Request) {
       duration: number;
       bufferTime?: number;
       staffIds?: string[];
+      active?: boolean;
     };
+    if (service.active !== true)
+      return fail("Este servicio no está disponible.", 404);
 
-    let staffId = input.data.staffId || service.staffIds?.[0];
+    let staffId = input.data.staffId;
 
     // Si no hay staffId explícito, buscar si existe algún integrante activo en el negocio
     if (!staffId) {
       const staffSnapshot = await database
         .collection(`businesses/${input.data.businessId}/staff`)
         .where("active", "==", true)
-        .limit(1)
         .get();
-      if (!staffSnapshot.empty) {
-        staffId = staffSnapshot.docs[0].id;
+      staffId = staffSnapshot.docs.find(
+        (document) =>
+          !service.staffIds?.length || service.staffIds.includes(document.id),
+      )?.id;
+    }
+    if (staffId) {
+      const staffSnapshot = await database
+        .doc(`businesses/${input.data.businessId}/staff/${staffId}`)
+        .get();
+      if (
+        !staffSnapshot.exists ||
+        staffSnapshot.data()?.active !== true ||
+        (service.staffIds?.length && !service.staffIds.includes(staffId))
+      ) {
+        return fail("El profesional no puede atender este servicio.", 400);
       }
     }
 
